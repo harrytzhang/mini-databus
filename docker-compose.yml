@@ -1,0 +1,15 @@
+# 本地学习用的最小环境：单节点 Kafka（KRaft 模式，无需 ZooKeeper）+ MySQL 8
+# 启动：docker compose up -d
+services:
+  kafka:
+    image: apache/kafka:3.8.0
+    ports:
+      - "9092:9092"
+
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: root123
+      TZ: Asia/Shanghai
+    ports:
+      - "3306:3306"

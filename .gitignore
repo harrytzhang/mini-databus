@@ -1,0 +1,8 @@
+.DS_Store
+.idea/
+__pycache__/
+*.pyc
+.venv/
+data-plane/target/
+control-plane/meta.db
+data-plane/connectors.json
