@@ -10,6 +10,7 @@ import org.slf4j.LoggerFactory;
 import java.io.File;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.net.BindException;
 import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -48,10 +49,19 @@ public class Worker {
         int port = Integer.parseInt(System.getenv().getOrDefault("WORKER_PORT", "8083"));
         File state = new File(System.getenv().getOrDefault("WORKER_STATE_FILE", "connectors.json"));
 
+        // 先占端口再恢复任务：端口被占用（通常是旧 Worker 还在运行）时直接退出，不启动任何任务线程
+        HttpServer server;
+        try {
+            server = HttpServer.create(new InetSocketAddress(port), 0);
+        } catch (BindException e) {
+            log.error("端口 {} 已被占用，可能已有 Worker 在运行；先停掉它，或用 WORKER_PORT 换端口", port);
+            System.exit(1);
+            return;
+        }
+
         Worker worker = new Worker(state);
         worker.restore();
 
-        HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);
         server.createContext("/connectors", worker::handle);
         server.setExecutor(Executors.newFixedThreadPool(4));
         server.start();
