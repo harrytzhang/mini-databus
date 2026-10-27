@@ -4,3 +4,5 @@ werkzeug>=2.0,<2.1
 requests>=2.27,<2.28
 confluent-kafka>=1.9.2,<2.0
 PyMySQL>=1.0.2,<1.0.3
+# MySQL 8 默认 caching_sha2_password 认证，PyMySQL 需要它
+cryptography>=3.4,<41

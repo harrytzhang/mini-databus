@@ -173,23 +173,79 @@ docker compose exec mysql mysql -uroot -proot123 \
 
 每条订单包含多个商品，清洗时会展开成多行，所以 MySQL 行数比订单数多。
 
-### 第 8 步：重新运行或停止
+### 第 8 步：全部重置，从头开始
 
-`demo.py` 只能成功运行一次，再次运行会因为数据源和结果表重名被拒绝。重新运行前：
+> **提醒**：`demo.py` 只能成功运行一次，再次运行会因为数据源和结果表重名被拒绝。
+> 另外，Worker 启动时会按 `connectors.json` 恢复旧任务，`meta.db` 也会保留旧的接入和清洗记录；
+> 如果 Kafka / MySQL 被重建过而这两个文件还在，就会出现 `UNKNOWN_TOPIC_OR_PARTITION`、topic 只有 1 个分区、库表不存在等状态不一致的问题。
+> 所以每次重跑，都按下面的顺序**全部清理后再启动**。
+
+**1. 全部清理**（项目根目录执行）
 
 ```bash
-# 1. 在终端 A、B 按 Ctrl+C 停掉 Worker 和 API
-# 2. 清理元数据、connector 配置和结果库
+./reset.sh
+```
+
+脚本 [reset.sh](reset.sh) 依次执行：结束占用 8083 / 8000 端口的 Worker 和 API 进程（先正常结束，10 秒未退出再强制结束）→ 删除 `control-plane/meta.db`、`data-plane/connectors.json` → `docker compose down -v` 删除 Kafka、MySQL 容器及数据。端口释放失败会报错退出。
+
+<details>
+<summary>等价的手动命令</summary>
+
+```bash
+fuser -k 8083/tcp 8000/tcp
+ss -lntp | grep -E ':8083|:8000'     # 没有输出才算清理干净
 rm -f control-plane/meta.db data-plane/connectors.json
-docker compose exec mysql mysql -uroot -proot123 -e "DROP DATABASE IF EXISTS mapleleaf_591"
-# 3. 回到第 4 步重新启动
+docker compose down -v
 ```
 
-停止全部环境：
+</details>
+
+**2. 重新启动基础环境**
 
 ```bash
-docker compose down        # 加 -v 会同时清空 Kafka、MySQL 中的数据
+docker compose up -d
+sleep 20
+docker compose ps                                          # kafka、mysql 都是 running
+docker compose exec mysql mysqladmin ping -uroot -proot123 # 输出 mysqld is alive 再继续
 ```
+
+**3. 终端 A：启动 Java 数据面**
+
+```bash
+cd data-plane
+mvn -q package
+java -jar target/mini-databus.jar
+```
+
+看到 `Worker 已启动，REST 端口 8083` 即成功。由于已删除 `connectors.json`，不应再出现“恢复 connector”日志。
+
+**4. 终端 B：启动 Python 控制面**
+
+```bash
+cd control-plane
+source .venv/bin/activate
+python app.py
+```
+
+看到 `Running on http://0.0.0.0:8000/` 且没有 Traceback 即成功。
+
+**5. 终端 C：运行演示**
+
+```bash
+cd control-plane
+source .venv/bin/activate
+python demo.py 100000
+```
+
+第 1、2、3 步都应返回 `-> 200 {"result": true, ...}`，之后开始灌数据并每 2 秒打印行数。
+
+**6. 验证**
+
+```bash
+docker compose exec mysql mysql -uroot -proot123 -e "SELECT COUNT(*) FROM mapleleaf_591.order_event_clean_591"
+```
+
+**只想停止环境、不再运行时**：在终端 A、B 按 `Ctrl+C`，再执行 `docker compose down`（加 `-v` 同时清空数据）。
 
 ### 常见问题
 
@@ -201,7 +257,12 @@ docker compose down        # 加 -v 会同时清空 Kafka、MySQL 中的数据
 | `pip install` 报找不到匹配版本 | 没用项目里的 `requirements.txt` | 按 `requirements.txt` 安装，它已固定为支持 Python 3.6 的版本 |
 | `demo.py` 报连接 8000/8083 失败 | API 或 Worker 没启动 | 检查终端 A、B 的进程和日志 |
 | `demo.py` 报连接 MySQL 失败 | MySQL 未初始化完 | 用 `mysqladmin ping` 确认后重试 |
-| `demo.py` 报名称已存在 | 已运行过一次 | 按第 8 步清理 |
+| `demo.py` 报名称已存在 | 已运行过一次 | 按第 8 步全部重置 |
+| `Address already in use` / `BindException` | 旧的 API 或 Worker 进程还在运行 | `ss -lntp \| grep -E ':8083\|:8000'` 查 pid 后 `kill`，或 `fuser -k 8083/tcp 8000/tcp` |
+| Worker 日志 `UNKNOWN_TOPIC_OR_PARTITION`、只分到 `xxx-0` 分区 | Kafka 被重建过，但 `connectors.json` / `meta.db` 还是旧的 | 按第 8 步全部重置 |
+| `Unknown database 'mapleleaf_591'` | demo 第 3 步“添加入库”失败，没有建库 | 看 demo 第 3 步输出和终端 B 日志，修复后按第 8 步重置 |
+| `'cryptography' package is required ...` | MySQL 8 默认认证需要 `cryptography` | `pip install -r requirements.txt`（已包含），或 `pip install "cryptography>=3.4,<41"` |
+| `CryptographyDeprecationWarning: Python 3.6 ...` | 仅提示 Python 3.6 将不再被支持 | 可忽略，不影响运行 |
 | 端口被占用 | 9092/3306/8083/8000 已被使用 | 停掉占用进程，或用下方环境变量改端口 |
 
 ### 配置
