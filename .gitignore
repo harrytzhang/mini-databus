@@ -6,4 +6,3 @@ __pycache__/
 data-plane/target/
 control-plane/meta.db
 data-plane/connectors.json
-bkcodeai.json
