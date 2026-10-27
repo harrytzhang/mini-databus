@@ -58,24 +58,177 @@ data-plane/               数据面（Java）
 
 建议阅读顺序：先看 `control-plane/access.py → clean.py → storage.py`，了解配置是怎么生成和下发的；再看 `data-plane/BaseTask → PullerTask → CleanTask → Etl → MysqlSinkTask`，了解数据是怎么流动的。
 
-## 运行
+## 运行（Linux 完整步骤）
 
-需要 Python 3.9+、JDK 11+、Maven，以及 Kafka 和 MySQL（可以用 `docker compose up -d` 启动）。
+以 TencentOS / CentOS / RHEL 为例，使用 `root` 用户，除特别说明外命令都在**项目根目录**执行。整体需要 3 个终端：
+
+| 终端 | 进程 | 端口 |
+| --- | --- | --- |
+| A | Java 数据面 Worker | 8083 |
+| B | Python 控制面 API | 8000 |
+| C | 演示脚本 / 验证命令 | - |
+
+Kafka（9092）和 MySQL（3306）由 Docker 在后台运行。
+
+### 第 1 步：安装依赖软件
+
+| 软件 | 版本要求 | 用途 |
+| --- | --- | --- |
+| Docker + Compose 插件 | Compose v2 | 运行 Kafka 3.8、MySQL 8.0 |
+| JDK | **11 及以上**（推荐 17） | 编译、运行数据面 |
+| Maven | 3.6+ | 构建数据面，自动下载 Java 依赖 |
+| Python | **3.9 及以上** | 运行控制面 |
 
 ```bash
-# 1. 启动 Java 数据面
-cd data-plane && mvn -q package && java -jar target/mini-databus.jar
+# JDK 17（必须带 -devel，才有 javac）、Maven、Python
+dnf install -y java-17-openjdk-devel maven python3 python3-pip
 
-# 2. 启动 Python 控制面（另开一个终端）
-cd control-plane && pip install -r requirements.txt && python app.py
-
-# 3. 端到端演示：创建接入、清洗、入库，灌 10 万条订单，观察 MySQL 行数（另开一个终端）
-cd control-plane && python demo.py 100000
+# Docker Engine + Compose 插件
+dnf install -y dnf-plugins-core
+dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+dnf install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+systemctl enable --now docker
 ```
 
-地址默认是 `localhost:9092`（Kafka）、`127.0.0.1:3306`（MySQL，root/root123）、`localhost:8083`（Worker）。用 `OUTER_KAFKA`、`MYSQL_HOST`、`WORKER_URL` 等环境变量修改，完整列表见 [settings.py](control-plane/settings.py)。
+如果系统自带的 `python3` 低于 3.9，再装一个高版本，后面用 `python3.11` 代替 `python3`：
 
-`demo.py` 只能运行一次，因为数据源和结果表重名会被拒绝。要重来，就删掉 `control-plane/meta.db` 和 `data-plane/connectors.json`，再删掉 MySQL 里的 `mapleleaf_591` 库。
+```bash
+dnf install -y python3.11 python3.11-pip
+```
+
+Ubuntu / Debian 把 `dnf` 换成 `apt`，包名为 `openjdk-17-jdk maven python3 python3-venv python3-pip`，Docker 参考 [官方文档](https://docs.docker.com/engine/install/)。
+
+### 第 2 步：让 Maven 使用 JDK 17
+
+Maven 默认使用系统里的 JDK，如果是 JDK 8，构建会报 `invalid flag: --release`。设置 `JAVA_HOME` 并写入 `~/.bashrc`：
+
+```bash
+ls -d /usr/lib/jvm/java-17-openjdk*                 # 查看实际安装路径
+echo 'export JAVA_HOME=/usr/lib/jvm/java-17-openjdk' >> ~/.bashrc   # 路径按上一条输出修改
+echo 'export PATH=$JAVA_HOME/bin:$PATH' >> ~/.bashrc
+source ~/.bashrc
+```
+
+### 第 3 步：检查环境
+
+```bash
+docker --version && docker compose version
+java -version        # 17.x
+mvn -v               # 输出中的 Java version 必须是 11 及以上
+python3 --version    # 3.9 及以上
+```
+
+### 第 4 步：启动 Kafka 和 MySQL
+
+```bash
+docker compose up -d
+docker compose ps    # kafka、mysql 两个容器都是 running
+```
+
+MySQL 首次启动需要十几秒初始化，等下面的命令输出 `mysqld is alive` 再继续：
+
+```bash
+docker compose exec mysql mysqladmin ping -uroot -proot123
+```
+
+### 第 5 步：构建并启动 Java 数据面（终端 A）
+
+```bash
+cd data-plane
+mvn -q package                       # 首次会从 Maven 中央仓库下载依赖，产物 target/mini-databus.jar
+java -jar target/mini-databus.jar    # 前台运行，监听 :8083
+```
+
+另开终端确认 Worker 已启动（返回 `[]` 或 connector 列表即正常）：
+
+```bash
+curl -s localhost:8083/connectors
+```
+
+### 第 6 步：安装依赖并启动 Python 控制面（终端 B）
+
+```bash
+cd control-plane
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt      # flask、requests、confluent-kafka、PyMySQL
+python app.py                        # 前台运行，监听 :8000
+```
+
+国内网络 pip 慢可以加镜像：`pip install -r requirements.txt -i https://mirrors.cloud.tencent.com/pypi/simple`。
+
+### 第 7 步：运行端到端演示（终端 C）
+
+```bash
+cd control-plane
+source .venv/bin/activate
+python demo.py 100000                # 参数为订单条数，默认 100000
+```
+
+脚本依次执行：
+
+1. 创建外部 topic `order_event`（模拟业务方的 Kafka）
+2. 创建接入，启动 Puller：`order_event` → Raw Topic `order_event591`
+3. 创建清洗配置并启动 Clean：Raw Topic → `table_591_order_event_clean`
+4. 添加 MySQL 入库，自动建表 `mapleleaf_591.order_event_clean_591` 并启动入库任务
+5. 向 `order_event` 灌入指定条数的订单
+6. 每 2 秒打印一次 MySQL 行数和写入速度，最后输出各任务状态与指标
+
+### 第 8 步：验证结果
+
+```bash
+curl -s localhost:8083/connectors           # Worker 中运行的 connector
+curl -s localhost:8000/v3/databus/tasks/    # 任务列表、状态和指标
+docker compose exec mysql mysql -uroot -proot123 \
+  -e "SELECT COUNT(*) FROM mapleleaf_591.order_event_clean_591"
+```
+
+每条订单包含多个商品，清洗时会展开成多行，所以 MySQL 行数比订单数多。
+
+### 第 9 步：重新运行或停止
+
+`demo.py` 只能成功运行一次，再次运行会因为数据源和结果表重名被拒绝。重新运行前：
+
+```bash
+# 1. 在终端 A、B 按 Ctrl+C 停掉 Worker 和 API
+# 2. 清理元数据、connector 配置和结果库
+rm -f control-plane/meta.db data-plane/connectors.json
+docker compose exec mysql mysql -uroot -proot123 -e "DROP DATABASE IF EXISTS mapleleaf_591"
+# 3. 回到第 5 步重新启动
+```
+
+停止全部环境：
+
+```bash
+docker compose down        # 加 -v 会同时清空 Kafka、MySQL 中的数据
+```
+
+### 常见问题
+
+| 现象 | 原因 | 处理 |
+| --- | --- | --- |
+| `invalid flag: --release` | Maven 用的是 JDK 8 | 按第 2 步设置 `JAVA_HOME`，`mvn -v` 确认 |
+| `mvn: command not found` | 未安装 Maven | `dnf install -y maven` |
+| `pip install` 报 Python 版本不满足 | Python 低于 3.9 | 安装 `python3.11`，用它创建 venv |
+| `demo.py` 报连接 8000/8083 失败 | API 或 Worker 没启动 | 检查终端 A、B 的进程和日志 |
+| `demo.py` 报连接 MySQL 失败 | MySQL 未初始化完 | 用 `mysqladmin ping` 确认后重试 |
+| `demo.py` 报名称已存在 | 已运行过一次 | 按第 9 步清理 |
+| 端口被占用 | 9092/3306/8083/8000 已被使用 | 停掉占用进程，或用下方环境变量改端口 |
+
+### 配置
+
+地址默认是 `localhost:9092`（Kafka）、`127.0.0.1:3306`（MySQL，root/root123）、`localhost:8083`（Worker）、`localhost:8000`（API），都可以用环境变量修改：
+
+| 变量 | 默认值 | 作用 |
+| --- | --- | --- |
+| `OUTER_KAFKA` / `INNER_KAFKA` | `localhost:9092` | Raw Topic / 清洗结果所在 Kafka |
+| `MYSQL_HOST` / `MYSQL_PORT` / `MYSQL_USER` / `MYSQL_PASSWORD` | `127.0.0.1` / `3306` / `root` / `root123` | 入库 MySQL |
+| `WORKER_URL` | `http://localhost:8083` | 控制面调用的 Worker 地址 |
+| `WORKER_PORT` / `WORKER_STATE_FILE` | `8083` / `connectors.json` | Worker 监听端口、配置持久化文件 |
+| `TOPIC_PARTITIONS` | `6` | 新建 topic 分区数，即最大并发度 |
+| `API_PORT` | `8000` | 控制面端口 |
+
+完整列表见 [settings.py](control-plane/settings.py)。
 
 ## 接口
 

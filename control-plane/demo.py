@@ -141,6 +141,8 @@ def main():
             break
         last = n
 
+
+
     print("\n== 6. 任务状态与指标 ==")
     for task in call("GET", f"/v3/databus/tasks/?processing_id={rt['result_table_id']}"):
         print(task["connector_task_name"], json.dumps(task["worker"], ensure_ascii=False))
