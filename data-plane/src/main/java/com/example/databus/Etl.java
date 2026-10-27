@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -55,7 +56,8 @@ public class Etl {
     }
 
     /** 平台生成的字段，不从规则树取值 */
-    static final Set<String> SYSTEM_FIELDS = Set.of("dtEventTimeStamp", "dtEventTime", "localTime", "timestamp");
+    static final Set<String> SYSTEM_FIELDS = Collections.unmodifiableSet(new HashSet<>(
+            Arrays.asList("dtEventTimeStamp", "dtEventTime", "localTime", "timestamp")));
     private static final DateTimeFormatter OUT_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     private final Map<String, Object> rule;
@@ -156,7 +158,7 @@ public class Etl {
     @SuppressWarnings("unchecked")
     private List<Map<String, Object>> runChildren(Map<String, Object> node, Object value) throws EtlException {
         List<Map<String, Object>> rows = Collections.singletonList(new HashMap<>());
-        List<Map<String, Object>> children = (List<Map<String, Object>>) node.getOrDefault("next", List.of());
+        List<Map<String, Object>> children = (List<Map<String, Object>>) node.getOrDefault("next", Collections.emptyList());
         for (Map<String, Object> child : children) {
             List<Map<String, Object>> childRows = runNode(child, value);
             List<Map<String, Object>> merged = new ArrayList<>(rows.size() * childRows.size());

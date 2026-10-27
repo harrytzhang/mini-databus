@@ -19,7 +19,10 @@ import storekit
 import worker
 
 app = Flask(__name__)
-app.json.ensure_ascii = False
+if hasattr(app, "json"):                 # Flask 2.2+
+    app.json.ensure_ascii = False
+else:                                    # Flask 2.0 / 2.1（Python 3.6 只能装到 2.0.x）
+    app.config["JSON_AS_ASCII"] = False
 log = logging.getLogger("app")
 
 

@@ -75,13 +75,15 @@ Kafka（9092）和 MySQL（3306）由 Docker 在后台运行。
 | 软件 | 版本要求 | 用途 |
 | --- | --- | --- |
 | Docker + Compose 插件 | Compose v2 | 运行 Kafka 3.8、MySQL 8.0 |
-| JDK | **11 及以上**（推荐 17） | 编译、运行数据面 |
+| JDK | **8 及以上** | 编译、运行数据面 |
 | Maven | 3.6+ | 构建数据面，自动下载 Java 依赖 |
-| Python | **3.9 及以上** | 运行控制面 |
+| Python | **3.6 及以上** | 运行控制面 |
+
+代码按以下最低环境适配：JDK 1.8.0_392、Maven 3.6.3、Python 3.6.8、Docker 24.0.6。
 
 ```bash
-# JDK 17（必须带 -devel，才有 javac）、Maven、Python
-dnf install -y java-17-openjdk-devel maven python3 python3-pip
+# JDK（必须带 -devel，才有 javac）、Maven、Python
+dnf install -y java-1.8.0-openjdk-devel maven python3 python3-pip
 
 # Docker Engine + Compose 插件
 dnf install -y dnf-plugins-core
@@ -90,35 +92,20 @@ dnf install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
 systemctl enable --now docker
 ```
 
-如果系统自带的 `python3` 低于 3.9，再装一个高版本，后面用 `python3.11` 代替 `python3`：
+Ubuntu / Debian 把 `dnf` 换成 `apt`，包名为 `openjdk-8-jdk maven python3 python3-venv python3-pip`，Docker 参考 [官方文档](https://docs.docker.com/engine/install/)。
 
-```bash
-dnf install -y python3.11 python3.11-pip
-```
-
-Ubuntu / Debian 把 `dnf` 换成 `apt`，包名为 `openjdk-17-jdk maven python3 python3-venv python3-pip`，Docker 参考 [官方文档](https://docs.docker.com/engine/install/)。
-
-### 第 2 步：让 Maven 使用 JDK 17
-
-Maven 默认使用系统里的 JDK，如果是 JDK 8，构建会报 `invalid flag: --release`。设置 `JAVA_HOME` 并写入 `~/.bashrc`：
-
-```bash
-ls -d /usr/lib/jvm/java-17-openjdk*                 # 查看实际安装路径
-echo 'export JAVA_HOME=/usr/lib/jvm/java-17-openjdk' >> ~/.bashrc   # 路径按上一条输出修改
-echo 'export PATH=$JAVA_HOME/bin:$PATH' >> ~/.bashrc
-source ~/.bashrc
-```
-
-### 第 3 步：检查环境
+### 第 2 步：检查环境
 
 ```bash
 docker --version && docker compose version
-java -version        # 17.x
-mvn -v               # 输出中的 Java version 必须是 11 及以上
-python3 --version    # 3.9 及以上
+java -version        # 1.8 及以上
+mvn -v               # 输出中的 Java version 是 1.8 及以上
+python3 --version    # 3.6 及以上
 ```
 
-### 第 4 步：启动 Kafka 和 MySQL
+`mvn -v` 显示的 Java 版本和 `java -version` 不一致时，用 `JAVA_HOME` 指定：`export JAVA_HOME=/usr/lib/jvm/java-1.8.0-openjdk`（路径以 `ls -d /usr/lib/jvm/*` 为准）。
+
+### 第 3 步：启动 Kafka 和 MySQL
 
 ```bash
 docker compose up -d
@@ -131,7 +118,7 @@ MySQL 首次启动需要十几秒初始化，等下面的命令输出 `mysqld is
 docker compose exec mysql mysqladmin ping -uroot -proot123
 ```
 
-### 第 5 步：构建并启动 Java 数据面（终端 A）
+### 第 4 步：构建并启动 Java 数据面（终端 A）
 
 ```bash
 cd data-plane
@@ -145,19 +132,20 @@ java -jar target/mini-databus.jar    # 前台运行，监听 :8083
 curl -s localhost:8083/connectors
 ```
 
-### 第 6 步：安装依赖并启动 Python 控制面（终端 B）
+### 第 5 步：安装依赖并启动 Python 控制面（终端 B）
 
 ```bash
 cd control-plane
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt      # flask、requests、confluent-kafka、PyMySQL
+pip install -U "pip<22"              # Python 3.6 自带的 pip 太旧，装不了 confluent-kafka 的预编译包
+pip install -r requirements.txt      # flask、requests、confluent-kafka、PyMySQL（已固定为支持 3.6 的版本）
 python app.py                        # 前台运行，监听 :8000
 ```
 
 国内网络 pip 慢可以加镜像：`pip install -r requirements.txt -i https://mirrors.cloud.tencent.com/pypi/simple`。
 
-### 第 7 步：运行端到端演示（终端 C）
+### 第 6 步：运行端到端演示（终端 C）
 
 ```bash
 cd control-plane
@@ -174,7 +162,7 @@ python demo.py 100000                # 参数为订单条数，默认 100000
 5. 向 `order_event` 灌入指定条数的订单
 6. 每 2 秒打印一次 MySQL 行数和写入速度，最后输出各任务状态与指标
 
-### 第 8 步：验证结果
+### 第 7 步：验证结果
 
 ```bash
 curl -s localhost:8083/connectors           # Worker 中运行的 connector
@@ -185,7 +173,7 @@ docker compose exec mysql mysql -uroot -proot123 \
 
 每条订单包含多个商品，清洗时会展开成多行，所以 MySQL 行数比订单数多。
 
-### 第 9 步：重新运行或停止
+### 第 8 步：重新运行或停止
 
 `demo.py` 只能成功运行一次，再次运行会因为数据源和结果表重名被拒绝。重新运行前：
 
@@ -194,7 +182,7 @@ docker compose exec mysql mysql -uroot -proot123 \
 # 2. 清理元数据、connector 配置和结果库
 rm -f control-plane/meta.db data-plane/connectors.json
 docker compose exec mysql mysql -uroot -proot123 -e "DROP DATABASE IF EXISTS mapleleaf_591"
-# 3. 回到第 5 步重新启动
+# 3. 回到第 4 步重新启动
 ```
 
 停止全部环境：
@@ -207,12 +195,13 @@ docker compose down        # 加 -v 会同时清空 Kafka、MySQL 中的数据
 
 | 现象 | 原因 | 处理 |
 | --- | --- | --- |
-| `invalid flag: --release` | Maven 用的是 JDK 8 | 按第 2 步设置 `JAVA_HOME`，`mvn -v` 确认 |
+| `invalid flag: --release` | 用的是旧版 `pom.xml` | 拉取最新代码，`pom.xml` 已改为 `source/target 1.8` |
 | `mvn: command not found` | 未安装 Maven | `dnf install -y maven` |
-| `pip install` 报 Python 版本不满足 | Python 低于 3.9 | 安装 `python3.11`，用它创建 venv |
+| `pip install confluent-kafka` 编译失败、找不到 `librdkafka` | pip 太旧，没用上预编译包 | 先执行 `pip install -U "pip<22"` 再装 |
+| `pip install` 报找不到匹配版本 | 没用项目里的 `requirements.txt` | 按 `requirements.txt` 安装，它已固定为支持 Python 3.6 的版本 |
 | `demo.py` 报连接 8000/8083 失败 | API 或 Worker 没启动 | 检查终端 A、B 的进程和日志 |
 | `demo.py` 报连接 MySQL 失败 | MySQL 未初始化完 | 用 `mysqladmin ping` 确认后重试 |
-| `demo.py` 报名称已存在 | 已运行过一次 | 按第 9 步清理 |
+| `demo.py` 报名称已存在 | 已运行过一次 | 按第 8 步清理 |
 | 端口被占用 | 9092/3306/8083/8000 已被使用 | 停掉占用进程，或用下方环境变量改端口 |
 
 ### 配置

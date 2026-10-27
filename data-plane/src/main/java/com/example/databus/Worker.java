@@ -12,6 +12,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -149,7 +150,7 @@ public class Worker {
                 return;
             }
             if (parts.length < 3) {
-                reply(ex, 404, Map.of("error", "not found"));
+                reply(ex, 404, Collections.singletonMap("error", "not found"));
                 return;
             }
 
@@ -162,16 +163,16 @@ public class Worker {
                 reply(ex, 200, info(name));
             } else if (parts.length == 3 && "GET".equals(method)) {
                 Map<String, Object> info = info(name);
-                reply(ex, info == null ? 404 : 200, info == null ? Map.of("error", "connector 不存在") : info);
+                reply(ex, info == null ? 404 : 200, info == null ? Collections.singletonMap("error", "connector 不存在") : info);
             } else if (parts.length == 3 && "DELETE".equals(method)) {
                 boolean deleted = deleteConnector(name);
-                reply(ex, deleted ? 200 : 404, Map.of("deleted", deleted));
+                reply(ex, deleted ? 200 : 404, Collections.singletonMap("deleted", deleted));
             } else {
-                reply(ex, 404, Map.of("error", "not found"));
+                reply(ex, 404, Collections.singletonMap("error", "not found"));
             }
         } catch (Exception e) {
             log.warn("处理请求失败：{}", e.toString());
-            reply(ex, 400, Map.of("error", String.valueOf(e.getMessage())));
+            reply(ex, 400, Collections.singletonMap("error", String.valueOf(e.getMessage())));
         }
     }
 

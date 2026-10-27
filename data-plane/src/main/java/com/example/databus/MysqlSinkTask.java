@@ -20,6 +20,8 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
@@ -43,7 +45,7 @@ import java.util.stream.Collectors;
  * - 其他错误：抛异常，任务失败重启
  */
 public class MysqlSinkTask extends BaseTask {
-    private static final Set<Integer> ROW_ERRORS = Set.of(
+    private static final Set<Integer> ROW_ERRORS = Collections.unmodifiableSet(new HashSet<>(Arrays.asList(
             1048, // 列不能为 NULL
             1062, // 唯一键冲突
             1264, // 数值越界
@@ -52,9 +54,10 @@ public class MysqlSinkTask extends BaseTask {
             1366, // 字符串编码不合法
             1406, // 数据过长
             1526  // 没有对应的分区
-    );
+    )));
     private static final String UNIQUE_KEY_COLUMN = "____key";
-    private static final List<String> SYSTEM_COLUMNS = List.of("thedate", "dtEventTime", "dtEventTimeStamp", "localTime");
+    private static final List<String> SYSTEM_COLUMNS = Collections.unmodifiableList(
+            Arrays.asList("thedate", "dtEventTime", "dtEventTimeStamp", "localTime"));
 
     private final String url;
     private final String user;

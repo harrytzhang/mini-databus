@@ -127,7 +127,7 @@ public class Connector {
             item.put("id", i);
             item.put("state", states.get(i) == null ? "UNASSIGNED" : states.get(i));
             BaseTask task = tasks.get(i);
-            item.put("metrics", task == null ? Map.of() : task.metrics().snapshot());
+            item.put("metrics", task == null ? Collections.<String, Long>emptyMap() : task.metrics().snapshot());
             taskInfos.add(item);
         }
         Map<String, Object> info = new LinkedHashMap<>();

@@ -1,4 +1,6 @@
-flask>=3.0
-requests>=2.31
-confluent-kafka>=2.3.0
-PyMySQL>=1.1.0
+# 兼容 Python 3.6（以下均为支持 3.6 的最后一个版本系列）
+flask>=2.0,<2.1
+werkzeug>=2.0,<2.1
+requests>=2.27,<2.28
+confluent-kafka>=1.9.2,<2.0
+PyMySQL>=1.0.2,<1.0.3

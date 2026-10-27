@@ -9,6 +9,7 @@ import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
@@ -173,7 +174,13 @@ public class CleanTask extends BaseTask {
 
     private static byte[] gunzip(byte[] data) throws IOException {
         try (GZIPInputStream in = new GZIPInputStream(new ByteArrayInputStream(data))) {
-            return in.readAllBytes();
+            ByteArrayOutputStream out = new ByteArrayOutputStream(data.length * 4);
+            byte[] chunk = new byte[8192];
+            int n;
+            while ((n = in.read(chunk)) != -1) {
+                out.write(chunk, 0, n);
+            }
+            return out.toByteArray();
         }
     }
 }
