@@ -21,22 +21,24 @@ import java.util.concurrent.Executors;
 
 /**
  * 数据面进程入口：一个极简版的 Kafka Connect Worker。
- *
+ * <p>
  * 原平台中，Python 控制面通过 Kafka Connect 的 REST 接口下发任务（文档 18.7.5）：
- *   PUT    /connectors/{name}/config   创建或更新 connector（更新时先停掉旧任务，再按新配置启动）
- *   GET    /connectors                 列出所有 connector
- *   GET    /connectors/{name}          查看配置和每个任务的状态、指标
- *   DELETE /connectors/{name}          停止并删除 connector
- *
+ * PUT    /connectors/{name}/config   创建或更新 connector（更新时先停掉旧任务，再按新配置启动）
+ * GET    /connectors                 列出所有 connector
+ * GET    /connectors/{name}          查看配置和每个任务的状态、指标
+ * DELETE /connectors/{name}          停止并删除 connector
+ * <p>
  * 这里用 JDK 自带的 HttpServer 实现同样的接口，不依赖 Web 框架。
  * connector 配置保存在本地 JSON 文件中，Worker 重启后会自动恢复（真实 Kafka Connect 存在 config topic 里）。
  */
 public class Worker {
     private static final Logger log = LoggerFactory.getLogger(Worker.class);
     static final ObjectMapper JSON = new ObjectMapper();
-    private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<Map<String, Object>>() { };
+    private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<Map<String, Object>>() {
+    };
     private static final TypeReference<Map<String, Map<String, String>>> STATE_TYPE =
-            new TypeReference<Map<String, Map<String, String>>>() { };
+            new TypeReference<Map<String, Map<String, String>>>() {
+            };
 
     private final Map<String, Connector> connectors = new LinkedHashMap<>();
     private final File stateFile;
@@ -115,7 +117,9 @@ public class Worker {
         return result;
     }
 
-    /** 进程退出时调用：只停止任务，不删除配置，下次启动会恢复 */
+    /**
+     * 进程退出时调用：只停止任务，不删除配置，下次启动会恢复
+     */
     synchronized void stopAll() {
         for (Connector c : connectors.values()) {
             c.stop();
