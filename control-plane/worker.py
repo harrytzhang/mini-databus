@@ -27,6 +27,7 @@ def start_task(name, conf, processing_id, task_type, source, sink):
         try:
             resp = requests.put(f"{settings.WORKER_URL}/connectors/{name}/config", json=conf, timeout=90)
             if resp.status_code == 400:            # 配置错误，重试没有意义
+                _set_status(name, "failed")
                 raise ValueError(f"Worker 拒绝了配置：{resp.json().get('error')}")
             resp.raise_for_status()
             _set_status(name, "running")
