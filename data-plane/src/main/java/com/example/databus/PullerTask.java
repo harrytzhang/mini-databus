@@ -77,6 +77,7 @@ public class PullerTask extends BaseTask {
         destPartitions = producer.partitionsFor(destTopic).size();
     }
 
+    //当消费到外部Kafka数据后，向outer Kafka发送固定格式的数据
     @Override
     protected void process(ConsumerRecord<byte[], byte[]> record) {
         metrics.inc("in");
