@@ -288,8 +288,8 @@ docker compose exec mysql mysql -uroot -proot123 -e "SELECT COUNT(*) FROM maplel
 | `PUT/GET /v3/access/deploy_plan/{raw_data_id}/` | 更新或查看接入（返回时密码脱敏） |
 | `POST /v3/databus/cleans/` | 创建清洗配置（不启动） |
 | `PUT/GET /v3/databus/cleans/{rt_id}/` | 更新或查看清洗配置；运行中的任务会重新下发 |
-| `POST /v3/databus/scenarios/setup_clean/` | 创建清洗配置并启动 |
-| `POST /v3/databus/tasks/` | 启动任务，`storages` 取 `kafka`（清洗）和/或 `mysql`（入库） |
+| `POST /v3/databus/scenarios/setup_clean/` | 创建清洗配置并启动，可带 `consume_position` |
+| `POST /v3/databus/tasks/` | 启动任务，`storages` 取 `kafka`（清洗）和/或 `mysql`（入库）；清洗可带 `consume_position` |
 | `DELETE /v3/databus/tasks/{rt_id}/?storages=kafka,mysql` | 停止任务 |
 | `GET /v3/databus/tasks/` | 任务列表，附带 Worker 中的实时状态和指标 |
 | `POST /v3/databus/data_storages/` | 添加 MySQL 入库：登记、建表、启动任务 |
@@ -297,6 +297,20 @@ docker compose exec mysql mysql -uroot -proot123 -e "SELECT COUNT(*) FROM maplel
 | `GET /v3/storekit/mysql/{rt_id}/prepare/`、`.../maintain/`、`/v3/storekit/mysql/maintain_all/` | 建表补字段、分区维护 |
 
 Java Worker 的接口：`GET /connectors`、`GET /connectors/{name}`、`PUT /connectors/{name}/config`、`DELETE /connectors/{name}`。
+
+### 清洗任务的两种启动方式（consume_position）
+
+| 取值 | 行为 | 控制面动作 |
+| --- | --- | --- |
+| `continue`（默认） | 从上次停止的位置继续消费，停止期间积压的数据会被补齐；从未消费过时从头开始 | 无 |
+| `tail` | 忽略停止期间的数据，从**调用接口时刻** Raw Topic 的末尾开始消费 | 先停止清洗任务，再把消费组 `connect-clean-{rt_id}` 在 Raw Topic 各分区的 offset 提交为 LEO |
+
+和原平台一样，Java 侧没有新增参数：控制面在下发任务之前，修改 `CleanTask` 启动时读取的消费组位点。原平台的 Kafka 方案是往结果 topic 写一条标记消息，本项目没有这样做，下游因此不会收到空 value 消息。`tail` 会自动先停止运行中的任务，所以对运行中的任务传 `tail` 也会生效。被跳过的数据不会自动补回。
+
+```bash
+curl -s -XPOST localhost:8000/v3/databus/tasks/ -H 'Content-Type: application/json' \
+  -d '{"result_table_id": "591_order_event_clean", "storages": ["kafka"], "consume_position": "tail"}'
+```
 
 ## 吞吐和可靠性
 

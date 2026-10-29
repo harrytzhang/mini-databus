@@ -1,9 +1,18 @@
 """清洗配置与清洗任务（对应 databus/clean.py + CleanShipper，文档第 8、9 章）。
 
 - create_clean   只创建配置，不启动（文档 L7：容易误以为已开始清洗）
-- start_clean    分区校验 -> 生成 TransformSinkConnector 配置 -> 下发到 Worker
+- start_clean    分区校验 -> 按 consume_position 调整消费位点 -> 生成 TransformSinkConnector 配置 -> 下发到 Worker
 - setup_clean    场景化接口：创建 + 启动
 - update_clean   更新配置；任务运行中会重新下发让配置生效（原平台用 ZK 通知热更新，文档第 13 章）
+
+两种启动方式（consume_position，对应原平台 CleanShipper 的同名参数）：
+- continue（默认）从上次停止的位置继续消费，停止期间积压的数据会被补齐
+- tail            忽略停止期间的数据，从调用接口时刻 Raw Topic 的末尾开始消费
+
+和原平台一样，Java 侧没有新增参数：控制面在下发任务【之前】修改 Java 启动时读取的状态。
+本项目的 CleanTask 从消费组 connect-{connector 名} 已提交的 offset 恢复，所以 tail 的做法是
+先停任务，再把该消费组的 offset 提交为 Raw Topic 各分区的 LEO（类似原平台 Pulsar 的 skip_all），
+不需要像原平台 Kafka 方案那样往结果 topic 写标记消息。
 """
 import json
 import re
@@ -19,6 +28,7 @@ FIELD_TYPES = {"string", "text", "int", "long", "float", "double", "boolean"}
 # 平台保留字段：由平台生成或用于存储，用户不能定义（文档 8.2.2 / 18.6.3）
 RESERVED_FIELDS = {"timestamp", "offset", "thedate", "dteventtime", "dteventtimestamp", "localtime", "____key"}
 NODE_TYPES = {"json", "split", "regex", "access", "iterate", "assign"}
+CONSUME_POSITIONS = ("continue", "tail")
 
 
 def rt_id_of(bk_biz_id, result_table_name):
@@ -32,6 +42,18 @@ def inner_topic(rt_id):
 
 def clean_name(rt_id):
     return f"clean-{rt_id}"
+
+
+def clean_group(rt_id):
+    """CleanTask 的消费组，与 CleanTask.consumerConfig() 中的 group.id 保持一致"""
+    return f"connect-{clean_name(rt_id)}"
+
+
+def validate_consume_position(value):
+    value = value or "continue"
+    if value not in CONSUME_POSITIONS:
+        raise ValueError(f"consume_position 取值不合法：{value}，可选 {list(CONSUME_POSITIONS)}")
+    return value
 
 
 # ------------------------- 校验 -------------------------
@@ -131,8 +153,9 @@ def update_clean(rt_id, params):
 
 
 def setup_clean(params):
+    consume_position = validate_consume_position(params.get("consume_position"))
     result = create_clean(params)
-    start_clean(result["result_table_id"])
+    start_clean(result["result_table_id"], consume_position)
     return result
 
 
@@ -168,7 +191,8 @@ def build_clean_conf(clean, raw, tasks_max):
     }
 
 
-def start_clean(rt_id):
+def start_clean(rt_id, consume_position="continue"):
+    consume_position = validate_consume_position(consume_position)
     clean = get_clean(rt_id)
     raw = access.get_raw_data(clean["raw_data_id"])
 
@@ -180,12 +204,24 @@ def start_clean(rt_id):
     if settings.BAD_DATA_TOPIC:
         kafka_admin.ensure_topic(settings.INNER_KAFKA, settings.BAD_DATA_TOPIC, 1)
 
+    if consume_position == "tail":
+        _seek_to_tail(rt_id, raw["topic"], raw_partitions)
+    # continue：什么都不做，CleanTask 从消费组已提交的 offset 继续；从未消费过时按 earliest 从头开始
+
     worker.start_task(
         clean_name(rt_id), build_clean_conf(clean, raw, raw_partitions),
         processing_id=rt_id, task_type="clean",
         source=f"kafka#{raw['topic']}", sink=f"kafka#{inner_topic(rt_id)}",
     )
     meta_db.execute("UPDATE databus_clean SET status='running' WHERE processing_id=?", (rt_id,))
+    return {"consume_position": consume_position}
+
+
+def _seek_to_tail(rt_id, raw_topic, raw_partitions):
+    """tail：先停任务（运行中的消费者会覆盖我们提交的 offset，broker 也会拒绝提交），
+    再把消费组位点推到 Raw Topic 末尾。跳过的截止点是调用接口的时刻，此后到达的数据会被消费。"""
+    stop_clean(rt_id)   # 未运行时 Worker 返回 404，视为成功
+    kafka_admin.seek_group_to_end(settings.OUTER_KAFKA, clean_group(rt_id), raw_topic, raw_partitions)
 
 
 def stop_clean(rt_id):
