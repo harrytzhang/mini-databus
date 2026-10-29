@@ -96,17 +96,19 @@ def setup_clean():
 
 # ------------------------- 任务启停 -------------------------
 # storages 里 "kafka" 表示清洗任务（输出到 kafka），"mysql" 表示入库任务（文档 5.4 / 18.5.3）
+# consume_position 只对清洗任务生效：continue（默认，补齐停止期间的数据）| tail（跳过停止期间的数据）
 
 @app.post("/v3/databus/tasks/")
 def start_tasks():
     params = body()
     rt_id = params["result_table_id"]
     storages = params.get("storages") or ["kafka"]
+    consume_position = clean.validate_consume_position(params.get("consume_position"))
     if "kafka" in storages:
-        clean.start_clean(rt_id)
+        clean.start_clean(rt_id, consume_position)
     if "mysql" in storages:
         storage.start_mysql(rt_id)
-    return ok({"result_table_id": rt_id, "started": storages})
+    return ok({"result_table_id": rt_id, "started": storages, "consume_position": consume_position})
 
 
 @app.delete("/v3/databus/tasks/<rt_id>/")
