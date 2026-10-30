@@ -178,8 +178,19 @@ def maintain_loop():
         time.sleep(60)
 
 
+def status_sync_loop():
+    """定时把 Worker 中任务的实际状态同步到 databus_connector_task.status（原平台由定时任务巡检 connector 状态）"""
+    while True:
+        time.sleep(settings.STATUS_SYNC_INTERVAL)
+        try:
+            worker.sync_all()
+        except Exception:   # 一轮失败不影响下一轮
+            log.exception("任务状态同步失败")
+
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     meta_db.init()
     threading.Thread(target=maintain_loop, name="maintain", daemon=True).start()
+    threading.Thread(target=status_sync_loop, name="status-sync", daemon=True).start()
     app.run(host="0.0.0.0", port=settings.API_PORT, threaded=True)

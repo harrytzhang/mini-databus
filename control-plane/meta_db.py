@@ -95,6 +95,14 @@ def execute(sql, params=()):
         return cur.lastrowid
 
 
+def update(sql, params=()):
+    """执行更新，返回受影响的行数（用于带条件的更新，判断是否真的改到了）"""
+    with closing(connect()) as conn:
+        cur = conn.execute(sql, params)
+        conn.commit()
+        return cur.rowcount
+
+
 def query_one(sql, params=()):
     with closing(connect()) as conn:
         row = conn.execute(sql, params).fetchone()
