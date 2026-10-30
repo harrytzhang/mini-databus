@@ -140,7 +140,8 @@ def start_mysql(rt_id):
     worker.start_task(
         mysql_name(rt_id), build_mysql_conf(info, tasks_max),
         processing_id=rt_id, task_type="mysql",
-        source=f"kafka#{topic}", sink=f"mysql#{info['physical_table_name']}",
+        source=f"kafka#{topic}",
+        sink=f"mysql#{info['physical_table_name']}"
     )
 
 
