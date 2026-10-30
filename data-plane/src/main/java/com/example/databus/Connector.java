@@ -8,6 +8,8 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicIntegerArray;
+import java.util.concurrent.atomic.AtomicLongArray;
 import java.util.concurrent.atomic.AtomicReferenceArray;
 
 /**
@@ -31,6 +33,10 @@ public class Connector {
     private final int tasksMax;
     private final AtomicReferenceArray<BaseTask> tasks;
     private final AtomicReferenceArray<String> states;
+    // 失败重启会把 state 在 FAILED / RUNNING 之间来回切换，单看 state 判断不了任务是否稳定，
+    // 所以额外记录失败次数和最近一次失败时间。它们挂在 Connector 上，任务重建后不会清零
+    private final AtomicIntegerArray failures;
+    private final AtomicLongArray lastFailureMs;
     private final List<Thread> threads = new ArrayList<>();
     private volatile boolean stopped = false;
 
@@ -40,6 +46,8 @@ public class Connector {
         this.tasksMax = Math.max(1, Integer.parseInt(conf.getOrDefault("tasks.max", "1")));
         this.tasks = new AtomicReferenceArray<>(tasksMax);
         this.states = new AtomicReferenceArray<>(tasksMax);
+        this.failures = new AtomicIntegerArray(tasksMax);
+        this.lastFailureMs = new AtomicLongArray(tasksMax);
         createTask(0); // 先试着创建一次：任务构造函数只读取并校验配置，配置有误时直接报错给调用方
     }
 
@@ -86,6 +94,8 @@ public class Connector {
             try {
                 task.execute();
             } catch (Exception e) {
+                failures.incrementAndGet(taskId);
+                lastFailureMs.set(taskId, System.currentTimeMillis());
                 states.set(taskId, "FAILED: " + e);
                 log.error("任务 {} 失败，{} 毫秒后重启", task.name(), RESTART_BACKOFF_MS, e);
                 sleepUnlessStopped(RESTART_BACKOFF_MS);
@@ -121,11 +131,16 @@ public class Connector {
     }
 
     public Map<String, Object> info() {
+        long now = System.currentTimeMillis();
         List<Map<String, Object>> taskInfos = new ArrayList<>();
         for (int i = 0; i < tasksMax; i++) {
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("id", i);
             item.put("state", states.get(i) == null ? "UNASSIGNED" : states.get(i));
+            item.put("failures", failures.get(i));
+            // 返回“距上次失败多少毫秒”而不是时间戳，控制面判断时不受两台机器时钟差的影响
+            long last = lastFailureMs.get(i);
+            item.put("ms_since_last_failure", last == 0 ? null : now - last);
             BaseTask task = tasks.get(i);
             item.put("metrics", task == null ? Collections.<String, Long>emptyMap() : task.metrics().snapshot());
             taskInfos.add(item);

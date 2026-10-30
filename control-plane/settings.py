@@ -11,6 +11,10 @@ BAD_DATA_TOPIC = os.getenv("BAD_DATA_TOPIC", "bad_data")       # 清洗失败的
 
 # ---------- Java 数据面 Worker（相当于 Kafka Connect 集群的 REST 地址）----------
 WORKER_URL = os.getenv("WORKER_URL", "http://localhost:8083")
+# 每隔多少秒把 Worker 中任务的实际状态同步到 databus_connector_task.status
+STATUS_SYNC_INTERVAL = int(os.getenv("STATUS_SYNC_INTERVAL", "30"))
+# 任务最近这么多秒内失败过就算 failed：失败任务每 5 秒重启一次，state 会在 FAILED / RUNNING 间来回跳
+TASK_FAILED_HOLD = int(os.getenv("TASK_FAILED_HOLD", "60"))
 
 # ---------- 元数据库 ----------
 # 原平台用 MySQL 存接入 / 清洗 / 任务配置；这里用 SQLite，不需要额外部署
